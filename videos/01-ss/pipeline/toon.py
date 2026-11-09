@@ -30,7 +30,7 @@ def grey_bg():
     return Image.new("RGB", (W, H), GREYBG)
 
 
-def sky_bg(ground=(122, 186, 90), horizon=760, sky_top=(120, 180, 230), sky_bot=(196, 226, 246), hills=True, t=0):
+def sky_bg(ground=(122, 186, 90), horizon=760, sky_top=(120, 180, 230), sky_bot=(196, 226, 246), hills=True, t=0, clouds=True):
     img = Image.new("RGB", (W, H)); d = ImageDraw.Draw(img)
     for y in range(horizon):
         k = y / horizon; d.line([0, y, W, y], fill=tuple(int(lerp(a, b, k)) for a, b in zip(sky_top, sky_bot)))
@@ -38,7 +38,7 @@ def sky_bg(ground=(122, 186, 90), horizon=760, sky_top=(120, 180, 230), sky_bot=
         d.ellipse([-300, horizon - 160, 900, horizon + 260], fill=(148, 200, 110))
         d.ellipse([700, horizon - 120, 2300, horizon + 300], fill=(136, 192, 100))
     d.rectangle([0, horizon, W, H], fill=ground)
-    for cx, cy, s in [(300, 150, 1), (1500, 110, .8), (1100, 230, .6)]:
+    for cx, cy, s in ([(300, 150, 1), (1500, 110, .8), (1100, 230, .6)] if clouds else []):
         cloud(d, cx + 12 * t, cy, s)
     return img
 
@@ -239,3 +239,124 @@ def icon(img, kind, x, y, s=1.0, t=1.0, label=None):
         d.rounded_rectangle([x - 80 * s, y - 40 * s, x + 80 * s, y + 40 * s], int(36 * s), fill=(214, 160, 90), outline=INK, width=lw)
         for k in (-40, 0, 40): d.line([x + (k - 14) * s, y - 24 * s, x + (k + 14) * s, y + 10 * s], fill=INK, width=max(1, lw - 2))
     if label: d.text((x, y + 110 * s / max(.01, back(t * 3))), label, font=F(48), fill=INK, anchor="mm")
+
+
+# ======================= v2 characters: proportions, details, motion =======================
+def _limb(d, p0, p1, p2, col, w, lw):
+    d.line([p0, p1, p2], fill=INK, width=w + 2 * lw, joint="curve")
+    d.line([p0, p1, p2], fill=col, width=w, joint="curve")
+
+
+def person2(img, x, y, s=1.0, coat=(70, 90, 140), trousers=(60, 60, 70), hat=None, hair=(90, 60, 40), mustache=False,
+            mouth=0.0, arm_r=0.0, arm_l=0.0, face=0, blink=False, skin=SKIN, alpha=1.0, walk=None, bob=0.0,
+            tilt=0.0, mood="neutral", collar=(235, 235, 235), belt=True, shadow=True, beard=False):
+    """Bigger head, stick legs, sleeves with hands, belt/collar, walk cycle (walk=phase), idle bob, head tilt, moods."""
+    if alpha <= 0: return
+    L = Image.new("RGBA", (int(420 * s), int(600 * s)), (0, 0, 0, 0)); d = ImageDraw.Draw(L)
+    cx = L.width / 2; by = L.height - 14 * s; lw = max(2, int(4 * s)); sd = 1 if face >= 0 else -1
+    yb = -abs(math.sin(walk * math.pi)) * 10 * s if walk is not None else bob * 6 * s
+    if shadow: d.ellipse([cx - 70 * s, by - 10 * s, cx + 70 * s, by + 8 * s], fill=(0, 0, 0, 50))
+    hip = (cx, by - 150 * s + yb)
+    # legs (stick legs with little shoes, swing while walking)
+    for k, dx in ((0, -16), (1, 16)):
+        sw = math.sin((walk or 0) * math.pi * 2 + k * math.pi) * (28 * s if walk is not None else 0)
+        knee = (cx + dx * s + sw * .5, by - 75 * s + yb / 2)
+        foot = (cx + dx * s + sw, by - 8 * s)
+        d.line([(hip[0] + dx * s, hip[1]), knee, foot], fill=INK, width=max(3, int(7 * s)), joint="curve")
+        d.ellipse([foot[0] - 6 * s + sd * 4 * s - 14 * s, foot[1] - 10 * s, foot[0] + sd * 4 * s + 18 * s, foot[1] + 8 * s], fill=(40, 34, 30))
+    # torso
+    top = by - 300 * s + yb; bot = hip[1] + 6 * s
+    d.rounded_rectangle([cx - 52 * s, top, cx + 52 * s, bot], int(22 * s), fill=coat, outline=INK, width=lw)
+    d.rectangle([cx - 50 * s, bot - 34 * s, cx + 50 * s, bot - lw], fill=trousers)
+    if belt: d.rectangle([cx - 50 * s, bot - 40 * s, cx + 50 * s, bot - 30 * s], fill=(40, 30, 24)); d.rectangle([cx - 8 * s, bot - 42 * s, cx + 8 * s, bot - 28 * s], fill=(210, 180, 90))
+    d.polygon([(cx - 22 * s, top + 2 * s), (cx, top + 34 * s), (cx + 22 * s, top + 2 * s)], fill=collar, outline=INK)
+    for k in range(3): d.ellipse([cx - 4 * s, top + (48 + 30 * k) * s, cx + 4 * s, top + (56 + 30 * k) * s], fill=INK)
+    # arms: shoulder -> elbow -> hand, arm value 0 (down) .. 1 (raised forward) ; swing while walking
+    for side, val in ((sd, arm_r), (-sd, arm_l)):  # arm_r = arm on the facing side
+        sx = cx + side * 50 * s; sy = top + 26 * s
+        swing = math.sin((walk or 0) * math.pi * 2 + (0 if side == sd else math.pi)) * .25 if walk is not None else 0
+        a = math.radians(lerp(95, -35, clamp(val + swing)))
+        ex = sx + math.cos(a) * 70 * s * side; ey = sy + math.sin(a) * 70 * s
+        hx = ex + math.cos(a - .25) * 62 * s * side; hy = ey + math.sin(a - .25) * 62 * s
+        _limb(d, (sx, sy), (ex, ey), (hx, hy), coat, int(22 * s), lw)
+        d.ellipse([hx - 12 * s, hy - 12 * s, hx + 12 * s, hy + 12 * s], fill=skin, outline=INK, width=max(1, lw - 1))
+    # head (Ziro-like proportions: big)
+    hr = 74 * s; hx0 = cx + tilt * 10 * s; hy = top - hr + 16 * s
+    d.ellipse([hx0 - hr, hy - hr, hx0 + hr, hy + hr], fill=skin, outline=INK, width=lw)
+    d.ellipse([hx0 - hr - 6 * s + (0 if sd > 0 else 2 * hr - 4 * s), hy - 10 * s, hx0 - hr + 14 * s + (0 if sd > 0 else 2 * hr - 4 * s), hy + 20 * s], fill=skin, outline=INK, width=max(1, lw - 1))  # ear
+    if hair: d.chord([hx0 - hr, hy - hr, hx0 + hr, hy + hr * .9], 180 + tilt * 8, 360 + tilt * 8, fill=hair, outline=INK, width=lw)
+    fx = hx0 + face * 18 * s
+    # eyes + brows by mood
+    brow = {"neutral": (0, 0), "happy": (-4, 4), "surprised": (-10, 0), "angry": (6, -6), "sad": (-4, 8)}.get(mood, (0, 0))
+    for k, ex2 in enumerate((-24, 24)):
+        if blink: d.line([fx + (ex2 - 9) * s, hy + 4 * s, fx + (ex2 + 9) * s, hy + 4 * s], fill=INK, width=lw)
+        else:
+            r = 9 if mood != "surprised" else 11
+            d.ellipse([fx + (ex2 - r) * s, hy + (4 - r) * s, fx + (ex2 + r) * s, hy + (4 + r) * s], fill=(255, 255, 255), outline=INK, width=max(1, lw - 1))
+            d.ellipse([fx + (ex2 - 4 + face * 3) * s, hy, fx + (ex2 + 4 + face * 3) * s, hy + 8 * s], fill=INK)
+        tilt_b = brow[1] * (1 if k == 0 else -1)
+        d.line([fx + (ex2 - 12) * s, hy + (-16 + brow[0] + tilt_b) * s, fx + (ex2 + 12) * s, hy + (-16 + brow[0] - tilt_b) * s], fill=INK, width=lw)
+    d.ellipse([fx - 5 * s, hy + 14 * s, fx + 9 * s, hy + 26 * s], fill=(236, 186, 160))  # nose
+    if mustache: d.rectangle([fx - 11 * s, hy + 28 * s, fx + 11 * s, hy + 36 * s], fill=INK)
+    if beard: d.chord([fx - hr * .8, hy + 10 * s, fx + hr * .8, hy + hr * 1.05], 0, 180, fill=hair or INK, outline=INK)
+    mo = clamp(mouth)
+    if mo > .12: d.ellipse([fx - 13 * s, hy + 38 * s, fx + 13 * s, hy + (42 + 26 * mo) * s], fill=(120, 30, 30), outline=INK, width=max(1, lw - 1))
+    elif mood == "sad": d.arc([fx - 16 * s, hy + 44 * s, fx + 16 * s, hy + 62 * s], 200, 340, fill=INK, width=lw)
+    elif mood == "angry": d.line([fx - 14 * s, hy + 48 * s, fx + 14 * s, hy + 46 * s], fill=INK, width=lw)
+    else: d.arc([fx - 16 * s, hy + 30 * s, fx + 16 * s, hy + 50 * s], 20, 160, fill=INK, width=lw)
+    # hats
+    if hat == "cap":
+        d.chord([hx0 - hr * 1.02, hy - hr * 1.12, hx0 + hr * 1.02, hy + hr * .45], 180, 360, fill=(36, 36, 40), outline=INK, width=lw)
+        d.rectangle([hx0 - hr * 1.05, hy - hr * .36, hx0 + hr * 1.05, hy - hr * .2], fill=(60, 60, 64), outline=INK, width=max(1, lw - 1))
+        d.polygon([(hx0 - hr * .3 * sd, hy - hr * .22), (hx0 + hr * 1.3 * sd, hy - hr * .08), (hx0 + hr * .4 * sd, hy - hr * .02)], fill=INK)
+    elif hat == "flat":
+        d.chord([hx0 - hr * 1.05, hy - hr * 1.08, hx0 + hr * 1.05, hy + hr * .35], 180, 360, fill=(110, 90, 70), outline=INK, width=lw)
+        d.ellipse([hx0 - hr * .1 * sd, hy - hr * .4, hx0 + hr * 1.35 * sd, hy - hr * .08] if sd > 0 else [hx0 - hr * 1.35, hy - hr * .4, hx0 + hr * .1, hy - hr * .08], fill=(110, 90, 70), outline=INK, width=max(1, lw - 1))
+    elif hat == "helmet":
+        d.chord([hx0 - hr * 1.18, hy - hr * 1.2, hx0 + hr * 1.18, hy + hr * .55], 180, 360, fill=(96, 106, 84), outline=INK, width=lw)
+        d.line([hx0 - hr * 1.3, hy - hr * .05, hx0 + hr * 1.3, hy - hr * .05], fill=INK, width=lw + 1)
+    if alpha < 1:
+        a = L.getchannel("A").point(lambda v: int(v * alpha)); L.putalpha(a)
+    img.paste(L, (int(x - L.width / 2), int(y - L.height + 14 * s)), L)
+
+
+def mascot2(img, x, y, s=1.0, mouth=0.0, point=0.0, blink=False, look=1, bob=0.0, wave_arm=0.0, tilt=0.0, mood="happy"):
+    """Our Archivist mascot, v2: idle bob, head tilt, two gesturing arms, scroll."""
+    L = Image.new("RGBA", (int(460 * s), int(660 * s)), (0, 0, 0, 0)); d = ImageDraw.Draw(L)
+    cx = L.width / 2; by = L.height - 14 * s; lw = max(2, int(5 * s)); yb = bob * 7 * s
+    d.ellipse([cx - 80 * s, by - 10 * s, cx + 80 * s, by + 8 * s], fill=(0, 0, 0, 50))
+    for dx in (-22, 22):
+        d.line([cx + dx * s, by - 160 * s + yb, cx + dx * s, by - 12 * s], fill=INK, width=max(3, int(8 * s)))
+        d.ellipse([cx + (dx - 22) * s, by - 22 * s, cx + (dx + 24) * s, by + 2 * s], fill=(90, 60, 40), outline=INK, width=2)
+    top, bot = by - 340 * s + yb, by - 150 * s + yb
+    d.rounded_rectangle([cx - 62 * s, top, cx + 62 * s, bot], int(30 * s), fill=(150, 104, 62), outline=INK, width=lw)
+    d.rectangle([cx - 60 * s, bot - 30 * s, cx + 60 * s, bot - lw], fill=(70, 70, 80))
+    for k in range(4): d.ellipse([cx - 6 * s, top + (50 + k * 28) * s, cx + 6 * s, top + (62 + k * 28) * s], fill=(240, 220, 160), outline=INK)
+    d.rounded_rectangle([cx - 56 * s, top - 6 * s, cx + 56 * s, top + 26 * s], int(12 * s), fill=(40, 130, 90), outline=INK, width=lw)
+    d.polygon([(cx + 18 * s, top + 20 * s), (cx + 46 * s, top + 20 * s), (cx + 54 * s, top + 120 * s), (cx + 28 * s, top + 116 * s)], fill=(40, 130, 90), outline=INK)
+    # right arm: points with scroll ; left arm: waves/gestures
+    for side, val in ((1, point), (-1, wave_arm)):
+        sx = cx + side * 62 * s; sy = top + 34 * s
+        a = math.radians(lerp(95, -40, clamp(val)))
+        ex = sx + math.cos(a) * 80 * s * side; ey = sy + math.sin(a) * 80 * s
+        hx = ex + math.cos(a - .3 * side) * 70 * s * side; hy = ey + math.sin(a - .3) * 70 * s
+        _limb(d, (sx, sy), (ex, ey), (hx, hy), (150, 104, 62), int(26 * s), lw)
+        if side == 1: d.line([hx, hy, hx + 60 * s * math.cos(a - .5), hy + 60 * s * math.sin(a - .5)], fill=(236, 222, 190), width=int(18 * s))
+        d.ellipse([hx - 15 * s, hy - 15 * s, hx + 15 * s, hy + 15 * s], fill=SKIN, outline=INK, width=2)
+    hr = 86 * s; hx0 = cx + tilt * 12 * s; hy = top - hr + 18 * s
+    d.ellipse([hx0 - hr, hy - hr, hx0 + hr, hy + hr], fill=SKIN, outline=INK, width=lw)
+    for k in (-1, 1): d.ellipse([hx0 + k * hr * .8 - 28 * s, hy - 44 * s, hx0 + k * hr * .8 + 28 * s, hy + 18 * s], fill=(205, 205, 210), outline=INK, width=2)
+    d.arc([hx0 - 30 * s, hy - hr - 20 * s, hx0 + 30 * s, hy - hr + 30 * s], 200, 340, fill=INK, width=lw)
+    fx = hx0 + look * 10 * s
+    for ex2 in (-32, 32):
+        d.ellipse([fx + (ex2 - 26) * s, hy - 26 * s, fx + (ex2 + 26) * s, hy + 26 * s], fill=(236, 244, 250), outline=INK, width=lw)
+        if blink: d.line([fx + (ex2 - 10) * s, hy, fx + (ex2 + 10) * s, hy], fill=INK, width=lw)
+        else: d.ellipse([fx + (ex2 - 8 + look * 5) * s, hy - 9 * s, fx + (ex2 + 8 + look * 5) * s, hy + 9 * s], fill=INK)
+    d.line([fx - 6 * s, hy, fx + 6 * s, hy], fill=INK, width=lw)
+    br = {"happy": 0, "surprised": -10, "serious": 6}.get(mood, 0)
+    for ex2 in (-32, 32): d.line([fx + (ex2 - 18) * s, hy + (-40 + br) * s, fx + (ex2 + 16) * s, hy + (-44 + br + (4 if mood == "serious" and ex2 < 0 else 0)) * s], fill=INK, width=lw)
+    mo = clamp(mouth)
+    if mo > .12: d.ellipse([fx - 18 * s, hy + 40 * s, fx + 18 * s, hy + (46 + 34 * mo) * s], fill=(130, 36, 36), outline=INK, width=lw)
+    elif mood == "serious": d.line([fx - 18 * s, hy + 50 * s, fx + 18 * s, hy + 50 * s], fill=INK, width=lw)
+    else: d.arc([fx - 24 * s, hy + 28 * s, fx + 24 * s, hy + 56 * s], 20, 160, fill=INK, width=lw)
+    img.paste(L, (int(x - L.width / 2), int(y - L.height + 14 * s)), L)
