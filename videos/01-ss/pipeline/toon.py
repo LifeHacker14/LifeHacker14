@@ -360,3 +360,57 @@ def mascot2(img, x, y, s=1.0, mouth=0.0, point=0.0, blink=False, look=1, bob=0.0
     elif mood == "serious": d.line([fx - 18 * s, hy + 50 * s, fx + 18 * s, hy + 50 * s], fill=INK, width=lw)
     else: d.arc([fx - 24 * s, hy + 28 * s, fx + 24 * s, hy + 56 * s], 20, 160, fill=INK, width=lw)
     img.paste(L, (int(x - L.width / 2), int(y - L.height + 14 * s)), L)
+
+
+# ======================= kinetic typography =======================
+def _word_layer(word, size, fill, stroke=0, stroke_fill=(30, 30, 30), sc=False):
+    f = F(size, sc); bb = f.getbbox(word, stroke_width=stroke)
+    L = Image.new("RGBA", (bb[2] - bb[0] + 20, bb[3] - bb[1] + 20), (0, 0, 0, 0))
+    ImageDraw.Draw(L).text((10 - bb[0], 10 - bb[1]), word, font=f, fill=fill, stroke_width=stroke, stroke_fill=stroke_fill)
+    return L
+
+
+def kin(img, xy, items, now, size=90, fill=INK, hl=None, stroke=0, stroke_fill=(30, 30, 30), sc=False, gap=0.32, wobble=3.0):
+    """Kinetic phrase. items: [(word, t_appear_newtime)], each word pops in at its own time.
+    hl: {word: 'marker' | 'circle' | 'red' | 'underline'} emphasis styles."""
+    hl = hl or {}
+    f = F(size, sc); sp = f.getlength(" ") * 1.1
+    widths = [f.getlength(w) for w, _ in items]; total = sum(widths) + sp * (len(items) - 1)
+    x = xy[0] - total / 2; y = xy[1]
+    d = ImageDraw.Draw(img, "RGBA")
+    for (w, ta), ww in zip(items, widths):
+        p = (now - ta) / 0.35
+        if p > 0:
+            style = hl.get(w)
+            cx = x + ww / 2
+            # emphasis behind the word
+            if style == "marker":
+                k = ease((now - ta - .15) / .35)
+                if k > 0: d.rounded_rectangle([x - 12, y - size * .42, x - 12 + (ww + 24) * k, y + size * .48], 14, fill=(255, 214, 80, 210))
+            col = RED if style in ("red", "circle", "underline") else fill
+            s = back(p); rot = ((hash(w) % 7) - 3) * wobble / 3
+            L = _word_layer(w, size, col, stroke, stroke_fill, sc)
+            if s != 1: L = L.resize((max(1, int(L.width * s)), max(1, int(L.height * s))), Image.BICUBIC)
+            L = L.rotate(rot, resample=Image.BICUBIC, expand=True)
+            a = clamp(p * 3)
+            if a < 1: L.putalpha(L.getchannel("A").point(lambda v: int(v * a)))
+            bounce = (1 - ease(p)) * -26
+            img.paste(L, (int(cx - L.width / 2), int(y - L.height / 2 + bounce)), L)
+            if style == "circle":
+                k = ease((now - ta - .2) / .5)
+                if k > 0: d.arc([x - 34, y - size * .75, x + ww + 34, y + size * .75], -100, -100 + 360 * k, fill=RED + (230,), width=7)
+            if style == "underline":
+                k = ease((now - ta - .15) / .35)
+                if k > 0:
+                    pts = [(x + ww * k * i / 12, y + size * .55 + math.sin(i * 1.7) * 4) for i in range(13)]
+                    d.line(pts, fill=RED + (230,), width=7, joint="curve")
+        x += ww + sp
+
+
+def shake(img, now, t0, amp=18, dur=0.35):
+    k = (now - t0) / dur
+    if 0 <= k < 1:
+        a = amp * (1 - k)
+        dx = int(math.sin(now * 90) * a); dy = int(math.cos(now * 77) * a)
+        img2 = Image.new("RGB", img.size, (0, 0, 0)); img2.paste(img, (dx, dy)); return img2
+    return img
